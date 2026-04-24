@@ -50,6 +50,13 @@ if((NOT GFLAGS_INCLUDE_PATH) OR (NOT GFLAGS_LIBRARY))
 endif()
 include_directories(${GFLAGS_INCLUDE_PATH})
 
+find_path(GLOG_INCLUDE_PATH NAMES glog/logging.h)
+find_library(GLOG_LIB NAMES glog)
+if((NOT GLOG_INCLUDE_PATH) OR (NOT GLOG_LIB))
+    message(FATAL_ERROR "Fail to find glog")
+endif()
+include_directories(${GLOG_INCLUDE_PATH})
+
 execute_process(
     COMMAND bash -c "grep \"namespace [_A-Za-z0-9]\\+ {\" ${GFLAGS_INCLUDE_PATH}/gflags/gflags_declare.h | head -1 | awk '{print $2}' | tr -d '\n'"
     OUTPUT_VARIABLE GFLAGS_NS
@@ -72,7 +79,7 @@ if (LINK_TCMALLOC)
     endif ()
 endif ()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CPP_FLAGS} -DGFLAGS_NS=${GFLAGS_NS} -DNDEBUG -O2 -D__const__=__unused__ -pipe -W -Wall -Wno-unused-parameter -fPIC -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CPP_FLAGS} -DBRPC_WITH_GLOG=1 -DGFLAGS_NS=${GFLAGS_NS} -DNDEBUG -O2 -D__const__=__unused__ -pipe -W -Wall -Wno-unused-parameter -fPIC -fno-omit-frame-pointer")
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # require at least gcc 4.8
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.8)
@@ -106,12 +113,18 @@ if ((NOT LEVELDB_INCLUDE_PATH) OR (NOT LEVELDB_LIB))
 endif()
 include_directories(${LEVELDB_INCLUDE_PATH})
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl")
+endif()
+find_package(OpenSSL REQUIRED)
+
 add_executable(counter_client client.cpp ${PROTO_SRC} ${PROTO_HEADER})
 add_executable(counter_server server.cpp ${PROTO_SRC} ${PROTO_HEADER})
 
 set(DYNAMIC_LIB
     ${CMAKE_THREAD_LIBS_INIT}
     ${GFLAGS_LIBRARY}
+    ${GLOG_LIB}
     ${PROTOBUF_LIBRARY}
     ${GPERFTOOLS_LIBRARIES}
     ${LEVELDB_LIB}
@@ -124,11 +137,36 @@ set(DYNAMIC_LIB
     z
     )
 
-target_link_libraries(counter_client
-                      "-Xlinker \"-(\""
-                      ${DYNAMIC_LIB}
-                      "-Xlinker \"-)\"")
-target_link_libraries(counter_server
-                      "-Xlinker \"-(\""
-                      ${DYNAMIC_LIB}
-                      "-Xlinker \"-)\"")
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(REMOVE_ITEM DYNAMIC_LIB rt dl ssl crypto)
+    list(APPEND DYNAMIC_LIB
+        ${OPENSSL_LIBRARIES}
+        "-framework CoreFoundation"
+        "-framework CoreGraphics"
+        "-framework CoreData"
+        "-framework CoreText"
+        "-framework Security"
+        "-framework Foundation"
+        "-Wl,-U,_MallocExtension_ReleaseFreeMemory"
+        "-Wl,-U,_ProfilerStart"
+        "-Wl,-U,_ProfilerStop"
+        "-Wl,-U,__Z13GetStackTracePPvii"
+        "-Wl,-U,_RegisterThriftProtocol"
+    )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_libraries(counter_client ${DYNAMIC_LIB})
+    target_link_libraries(counter_server ${DYNAMIC_LIB})
+    target_link_libraries(counter_client ${BRAFT_LIB} ${BRPC_LIB})
+    target_link_libraries(counter_server ${BRAFT_LIB} ${BRPC_LIB})
+else()
+    target_link_libraries(counter_client
+                          "-Xlinker \"-(\""
+                          ${DYNAMIC_LIB}
+                          "-Xlinker \"-)\"")
+    target_link_libraries(counter_server
+                          "-Xlinker \"-(\""
+                          ${DYNAMIC_LIB}
+                          "-Xlinker \"-)\"")
+endif()

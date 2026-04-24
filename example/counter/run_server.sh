@@ -20,24 +20,46 @@ if [[ ! -d "$mydir" ]]; then mydir="$PWD"; fi
 . $mydir/../shflags
 
 # define command-line flags
-DEFINE_string crash_on_fatal 'true' 'Crash on fatal log'
-DEFINE_integer bthread_concurrency '18' 'Number of worker pthreads'
-DEFINE_string sync 'true' 'fsync each time'
-DEFINE_string valgrind 'false' 'Run in valgrind'
-DEFINE_integer max_segment_size '8388608' 'Max segment size'
-DEFINE_integer server_num '3' 'Number of servers'
-DEFINE_boolean clean 1 'Remove old "runtime" dir before running'
-DEFINE_integer port 8100 "Port of the first server"
+DEFINE_string crash_on_fatal 'true' 'Crash on fatal log' c
+DEFINE_integer bthread_concurrency '18' 'Number of worker pthreads' b
+DEFINE_string sync 'true' 'fsync each time' s
+DEFINE_string valgrind 'false' 'Run in valgrind' v
+DEFINE_integer max_segment_size '8388608' 'Max segment size' m
+DEFINE_integer server_num '3' 'Number of servers' n
+DEFINE_boolean clean 1 'Remove old "runtime" dir before running' l
+DEFINE_integer port 8100 "Port of the first server" p
 
-# parse the command-line
-FLAGS "$@" || exit 1
-eval set -- "${FLAGS_ARGV}"
+if [[ "$(uname)" == "Darwin" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            --crash_on_fatal=*) FLAGS_crash_on_fatal="${arg#*=}" ;;
+            --bthread_concurrency=*) FLAGS_bthread_concurrency="${arg#*=}" ;;
+            --sync=*) FLAGS_sync="${arg#*=}" ;;
+            --valgrind=*) FLAGS_valgrind="${arg#*=}" ;;
+            --max_segment_size=*) FLAGS_max_segment_size="${arg#*=}" ;;
+            --server_num=*) FLAGS_server_num="${arg#*=}" ;;
+            --clean) FLAGS_clean=0 ;;
+            --clean=*) FLAGS_clean="${arg#*=}" ;;
+            --port=*) FLAGS_port="${arg#*=}" ;;
+            *) echo "Unknown option: $arg" >&2; exit 1 ;;
+        esac
+    done
+else
+    FLAGS "$@" || exit 1
+    eval set -- "${FLAGS_ARGV}"
+fi
 
 # The alias for printing to stderr
 alias error=">&2 echo counter: "
 
-# hostname prefers ipv6
-IP=`hostname -i | awk '{print $NF}'`
+# hostname prefers ipv6 on Linux; macOS does not support `hostname -i`.
+IP=`hostname -i 2>/dev/null | awk '{print $NF}'`
+if [ -z "$IP" ]; then
+    IP=`ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}'`
+fi
+if [ -z "$IP" ]; then
+    IP="127.0.0.1"
+fi
 
 if [ "$FLAGS_valgrind" == "true" ] && [ $(which valgrind) ] ; then
     VALGRIND="valgrind --tool=memcheck --leak-check=full"
@@ -60,7 +82,6 @@ for ((i=0; i<$FLAGS_server_num; ++i)); do
     cd runtime/$i
     ${VALGRIND} ./counter_server \
         -bthread_concurrency=${FLAGS_bthread_concurrency}\
-        -crash_on_fatal_log=${FLAGS_crash_on_fatal} \
         -raft_max_segment_size=${FLAGS_max_segment_size} \
         -raft_sync=${FLAGS_sync} \
         -port=$((${FLAGS_port}+i)) -conf="${raft_peers}" > std.log 2>&1 &

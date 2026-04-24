@@ -21,21 +21,46 @@ if [[ ! -d "$mydir" ]]; then mydir="$PWD"; fi
 
 
 # define command-line flags
-DEFINE_boolean clean 1 'Remove old "runtime" dir before running'
-DEFINE_integer add_percentage 100 'Percentage of fetch_add operation'
-DEFINE_integer bthread_concurrency '8' 'Number of worker pthreads'
-DEFINE_integer server_port 8100 "Port of the first server"
-DEFINE_integer server_num '3' 'Number of servers'
-DEFINE_integer thread_num 1 'Number of sending thread'
-DEFINE_string crash_on_fatal 'true' 'Crash on fatal log'
-DEFINE_string log_each_request 'false' 'Print log for each request'
-DEFINE_string valgrind 'false' 'Run in valgrind'
-DEFINE_string use_bthread "true" "Use bthread to send request"
+DEFINE_boolean clean 1 'Remove old "runtime" dir before running' c
+DEFINE_integer add_percentage 100 'Percentage of fetch_add operation' a
+DEFINE_integer bthread_concurrency '8' 'Number of worker pthreads' b
+DEFINE_integer server_port 8100 "Port of the first server" p
+DEFINE_integer server_num '3' 'Number of servers' n
+DEFINE_integer thread_num 1 'Number of sending thread' t
+DEFINE_string crash_on_fatal 'true' 'Crash on fatal log' r
+DEFINE_string log_each_request 'false' 'Print log for each request' l
+DEFINE_string valgrind 'false' 'Run in valgrind' v
+DEFINE_string use_bthread "true" "Use bthread to send request" u
 
-FLAGS "$@" || exit 1
+if [[ "$(uname)" == "Darwin" ]]; then
+    for arg in "$@"; do
+        case "$arg" in
+            --clean) FLAGS_clean=0 ;;
+            --clean=*) FLAGS_clean="${arg#*=}" ;;
+            --add_percentage=*) FLAGS_add_percentage="${arg#*=}" ;;
+            --bthread_concurrency=*) FLAGS_bthread_concurrency="${arg#*=}" ;;
+            --server_port=*) FLAGS_server_port="${arg#*=}" ;;
+            --server_num=*) FLAGS_server_num="${arg#*=}" ;;
+            --thread_num=*) FLAGS_thread_num="${arg#*=}" ;;
+            --crash_on_fatal=*) FLAGS_crash_on_fatal="${arg#*=}" ;;
+            --log_each_request=*) FLAGS_log_each_request="${arg#*=}" ;;
+            --valgrind=*) FLAGS_valgrind="${arg#*=}" ;;
+            --use_bthread=*) FLAGS_use_bthread="${arg#*=}" ;;
+            *) echo "Unknown option: $arg" >&2; exit 1 ;;
+        esac
+    done
+else
+    FLAGS "$@" || exit 1
+fi
 
-# hostname prefers ipv6
-IP=`hostname -i | awk '{print $NF}'`
+# hostname prefers ipv6 on Linux; macOS does not support `hostname -i`.
+IP=`hostname -i 2>/dev/null | awk '{print $NF}'`
+if [ -z "$IP" ]; then
+    IP=`ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}'`
+fi
+if [ -z "$IP" ]; then
+    IP="127.0.0.1"
+fi
 
 if [ "$FLAGS_valgrind" == "true" ] && [ $(which valgrind) ] ; then
     VALGRIND="valgrind --tool=memcheck --leak-check=full"
@@ -52,8 +77,6 @@ ${VALGRIND} ./counter_client \
         --add_percentage=${FLAGS_add_percentage} \
         --bthread_concurrency=${FLAGS_bthread_concurrency} \
         --conf="${raft_peers}" \
-        --crash_on_fatal_log=${FLAGS_crash_on_fatal} \
         --log_each_request=${FLAGS_log_each_request} \
         --thread_num=${FLAGS_thread_num} \
         --use_bthread=${FLAGS_use_bthread} \
-
